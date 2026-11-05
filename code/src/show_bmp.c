@@ -1,125 +1,43 @@
 #include "show_bmp.h"
-
-int show_bmp(char *pathname)
-{
-	//打开图片文件
-	int bmpfd = open(pathname, O_RDWR);
-	if(-1 == bmpfd)
-	{
-		printf("open bmp err!\n");
-		return -1;
-	}
-	
-	//打开显示屏的设备文件  open
-	int lcdfd = open("/dev/fb0", O_RDWR);
-	if(-1 == lcdfd)
-	{
-		printf("open lcd err!\n");
-		return -1;
-	}
-	
-	//4.跳过图片文件前54字节的文件信息头
-	lseek(bmpfd, 54, SEEK_SET);
-	
-	//5.读取800*480*3 （1152000）字节的颜色数据
-	char BGR[800*480*3];
-	read(bmpfd, BGR, 800*480*3);
-	
-	//6.需要将BGR数据转换为屏幕要求的ARGB格式
-	int ARGB[800*480];
-	int i;
-	for(i=0; i<800*480; i++)
-		ARGB[i] = BGR[3*i] | BGR[3*i+1]<<8 | BGR[3*i+2]<<16;
-	//				B         G            R
-	
-	//7.由于BMP图片是由下往上存，所有需要进行按行翻转
-	int data[800*480];
-	int x, y;
-	for(y=0; y<480; y++)
-		for(x=0; x<800; x++)
-			data[(479-y)*800+x] = ARGB[y*800+x];
-		
-	//8.将处理好的数据写入显示屏设备文件
-	//write(lcdfd, data, 800*480*4);
-	
-	//内存映射，提高数据写入效率
-	int *p = mmap(NULL, 800*480*4, PROT_READ|PROT_WRITE, MAP_SHARED, 
-				lcdfd, 0);
-				
-	for(y=0; y<480; y++)
-		for(x=0; x<800; x++)
-			*(p+y*800+x) = data[y*800+x];
-		
-	munmap(p, 800*480*4);
-	
-	//9.关闭显示屏设备文件和图片文件
-	close(lcdfd);
-	close(bmpfd);
-	
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+static uint32_t le32(const unsigned char *p) {
+    return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
 }
-
-//显示非全屏图片
-int show_bmp_any(char *pathname,int w, int h, int rx, int ry)
-{
-	if((w+rx>800) || (h+ry>480) || (w*3%4!=0))
-	{
-		printf("bmp err!\n");
-		return -1;
-	}
-	
-	//打开图片文件
-	int bmpfd = open(pathname, O_RDWR);
-	if(-1 == bmpfd)
-	{
-		printf("open bmp err!\n");
-		return -1;
-	}
-	
-	//打开显示屏的设备文件  open
-	int lcdfd = open("/dev/fb0", O_RDWR);
-	if(-1 == lcdfd)
-	{
-		printf("open lcd err!\n");
-		return -1;
-	}
-	
-	//4.跳过图片文件前54字节的文件信息头
-	lseek(bmpfd, 54, SEEK_SET);
-	
-	//5.读取w*h*3 字节的颜色数据
-	char BGR[w*h*3];
-	read(bmpfd, BGR, w*h*3);
-	
-	//6.需要将BGR数据转换为屏幕要求的ARGB格式
-	int ARGB[w*h];
-	int i;
-	for(i=0; i<w*h; i++)
-		ARGB[i] = BGR[3*i] | BGR[3*i+1]<<8 | BGR[3*i+2]<<16;
-	//				B             G              R
-	
-	//7.由于BMP图片是由下往上存，所有需要进行按行翻转
-	int data[w*h];
-	int x, y;
-	for(y=0; y<h; y++)
-		for(x=0; x<w; x++)
-			data[(h-1-y)*w+x] = ARGB[y*w+x];
-		
-	//8.将处理好的数据写入显示屏设备文件
-	//write(lcdfd, data, 800*480*4);
-	
-	//内存映射，提高数据写入效率
-	int *p = mmap(NULL, 800*480*4, PROT_READ|PROT_WRITE, MAP_SHARED, 
-				lcdfd, 0);
-				
-	for(y=0; y<h; y++)
-		for(x=0; x<w; x++)
-			*(p+(ry+y)*800+x+rx) = data[y*w+x];
-		//	*(p + ry*800 + rx)	= data[0];
-			
-	munmap(p, 800*480*4);
-	
-	//9.关闭显示屏设备文件和图片文件
-	close(lcdfd);
-	close(bmpfd);
-	
+int show_bmp_any(char *file,int w,int h,int rx,int ry) {
+    unsigned char header[54], *row=NULL;
+    uint32_t *screen=NULL, offset, height;
+    int fd=-1,result=-1,y,x,top_down;
+    size_t stride;
+    FILE *fp;
+    if(w<=0 || h<=0 || rx<0 || ry<0 || w>800-rx || h>480-ry) return -1;
+    fp=fopen(file,"rb");
+    if(!fp) { perror(file); return -1; }
+    if(fread(header,1,sizeof header,fp)!=sizeof header || header[0]!='B' || header[1]!='M' ||
+       le32(header+14)<40 || le32(header+18)!=(uint32_t)w || header[26]!=1 || header[27]!=0 ||
+       header[28]!=24 || header[29]!=0 || le32(header+30)!=0) goto done;
+    height=le32(header+22); top_down=(height&0x80000000U)!=0;
+    if((top_down ? (~height+1U) : height)!=(uint32_t)h) goto done;
+    offset=le32(header+10);
+    if(offset<54 || offset>0x7fffffffU || fseek(fp,(long)offset,SEEK_SET)) goto done;
+    stride=((size_t)w*3+3)&~(size_t)3;
+    row=malloc(stride);
+    if(!row) goto done;
+    fd=open("/dev/fb0",O_RDWR);
+    if(fd<0) goto done;
+    screen=mmap(NULL,800*480*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+    if(screen==MAP_FAILED) { screen=NULL; goto done; }
+    for(y=0;y<h;++y) {
+        int dy=ry+(top_down ? y : h-1-y);
+        if(fread(row,1,stride,fp)!=stride) goto done;
+        for(x=0;x<w;++x) screen[dy*800+rx+x]=(uint32_t)row[x*3]|(uint32_t)row[x*3+1]<<8|(uint32_t)row[x*3+2]<<16;
+    }
+    result=0;
+done:
+    if(screen) munmap(screen,800*480*4);
+    if(fd>=0) close(fd);
+    free(row); fclose(fp); return result;
 }
+int show_bmp(char *file) { return show_bmp_any(file,800,480,0,0); }

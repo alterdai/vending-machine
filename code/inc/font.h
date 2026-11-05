@@ -2,11 +2,7 @@
 #define __font_h__
 
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #define color u32
 #define getColor(a, b, c, d) (a|b<<8|c<<16|d<<24)
 
@@ -20,18 +16,7 @@ typedef short s16;
 typedef int s32;
 typedef long long s64;
 
-typedef struct stbtt_fontinfo
-{
-   void           * userdata;
-   unsigned char  * data;              // pointer to .ttf file
-   int              fontstart;         // offset of start of font
-
-   int numGlyphs;                     // number of glyphs, needed for range checking
-
-   int loca,head,glyf,hhea,hmtx,kern; // table locations as offset from start of .ttf
-   int index_map;                     // a cmap mapping for our chosen character encoding
-   int indexToLocFormat;              // format needed to map from glyph index to glyph
-} stbtt_fontinfo;
+#include "../vendor/stb_truetype.h"
 
 
 typedef struct{

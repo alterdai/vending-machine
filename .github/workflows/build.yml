@@ -1,0 +1,16 @@
+name: Build and test
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C code CC=gcc
+      - run: make -C code CC=gcc test
+      - name: Check memory safety
+        run: |
+          cd code
+          gcc -std=c99 -g -fsanitize=address,undefined -Iinc src/cart.c tests/cart_test.c -o bin/cart_asan
+          (cd bin && ./cart_asan)
+          gcc -std=c99 -g -fsanitize=address,undefined -Iinc src/font.c tests/font_test.c -lm -o bin/font_asan
+          ./bin/font_asan /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
