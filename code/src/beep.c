@@ -18,6 +18,7 @@ void beep(int on, int time)
         if (ret < 0)
         {
             perror("ioctl:");
+            close(fd);
             return;
         }
     }
@@ -28,6 +29,7 @@ void beep(int on, int time)
         if (ret < 0)
         {
             perror("ioctl:");
+            close(fd);
             return;
         }
     }

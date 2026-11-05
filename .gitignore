@@ -1,0 +1,5 @@
+code/bin/
+*.obj
+*.exe
+*.tmp
+cart-test-stock.txt
